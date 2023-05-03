@@ -1,6 +1,6 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
-use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum, PhysAddr};
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -147,6 +147,83 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
+    /// 翻译给定的虚拟地址，获得物理地址
+   pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
+        self.find_pte(va.floor()).map(|pte| {
+            let aligned_pa: PhysAddr = pte.ppn().into();
+            let offset = va.page_offset();
+            let aligned_pa_usize: usize = aligned_pa.into();
+            (aligned_pa_usize + offset).into()
+        })
+    }
+
+  /// start 没有按页大小对齐
+  /// port & !0x7 != 0 (port 其余位必须为0)
+  /// port & 0x7 = 0 (这样的内存无意义)
+  /// [start, start + len) 中存在已经被映射的页
+  /// 物理内存不足
+  /// mmap
+   pub fn mmap(&mut self,start:usize,len:usize,port:usize)->isize{
+        let start_va : VirtAddr = start.into();
+        let end_va : VirtAddr = (start + len).into();
+        let start_vpn : VirtPageNum= start_va.floor().into();
+        let end_vpn : VirtPageNum= end_va.ceil().into();
+
+        info!("port is {}",port);
+        if start_va.page_offset()!=0{
+            return -1;
+        }
+        if (port & !0x7 !=0 ) || (port & 0x7 ==0) {
+            return -1;
+        }
+        // 第 0 位表示是否可读，第 1 位表示是否可写，第 2 位表示是否可执行。其他位无效且必须为 0
+        let mut flag = PTEFlags::U | PTEFlags::V;
+        if port & 1 == 1{
+            flag = flag | PTEFlags::R;
+        } 
+        if port>>1 & 1 == 1{
+            flag = flag | PTEFlags::W;
+        }
+        if port>>2 & 1 == 1{
+            flag = flag | PTEFlags::X;
+        }
+        info!("{:#?} =>> {:#?} =>> {:#?} =>> {:#?}",start_va,end_va,start_vpn,end_vpn);
+        for num in start_vpn.0..=end_vpn.0{
+             let vpn  = num.into();
+             let pte = self.find_pte_create(vpn).unwrap();
+             if pte.is_valid(){
+                 info!("this is has map  ========");
+                 return -1;
+             }
+             info!("maping {:#?} {:#?} {:#?} =>>>> {:#?}",start_vpn,end_vpn,vpn,flag);
+             *pte = PageTableEntry::new(vpn.0.into(),flag);
+         }
+        0
+   }
+   /// unmmap 
+    pub fn unmmap(&mut self,start:usize,len:usize)->isize{
+        let start_va : VirtAddr = start.into();
+        let end_va : VirtAddr = (start + len).into();
+        let start_vpn : VirtPageNum= start_va.floor().into();
+        let end_vpn : VirtPageNum= end_va.ceil().into();
+        for num in start_vpn.0..=end_vpn.0{
+             let vpn  = num.into();
+             match self.find_pte(vpn){
+                None => return -1,
+                Some(pte) =>{
+                    if !pte.is_valid(){
+                       return -1;
+                  }
+                *pte = PageTableEntry::empty();
+
+                }
+             }
+                      }
+        0
+    
+
+    }
+
 }
 
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
@@ -171,7 +248,24 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     }
     v
 }
+/// va =>>> pa
+pub fn translate_va_pa(token: usize,va : VirtAddr) -> Option<PhysAddr>{
+    PageTable::from_token(token).translate_va(va.clone())
+}
+
+/// 根据va 获得对于的类型T
+pub fn translate_va_t<T>(token:usize,va:VirtAddr) -> &'static mut T{
+    translate_va_pa(token,va).unwrap().get_mut()
+}
+
+/// mmap
+pub fn mmap(token:usize,start:usize,len:usize,port:usize)->isize{
+    PageTable::from_token(token).mmap(start, len, port)
+}
 
 
 
-
+/// unmmap
+pub fn unmmap(token:usize,start:usize,len:usize)->isize{
+    PageTable::from_token(token).unmmap(start, len)
+}

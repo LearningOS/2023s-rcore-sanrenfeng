@@ -2,9 +2,9 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token,
-    }, timer::get_time_us,
-   mm::{PageTable, VirtAddr},
+        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, current_task_time, current_task_sys_time,
+    }, timer::{get_time_us, get_time_ms},
+    mm::{translate_va_t,mmap, unmmap},
 };
 
 #[repr(C)]
@@ -45,10 +45,11 @@ pub fn sys_yield() -> isize {
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
-    let mut ts = PageTable::from_token(current_user_token()).translate(VirtAddr::from(_ts as usize).into()).unwrap().ppn().get_mut::<TimeVal>();    
-    ts.sec= us / 1_000_000;
-    ts.usec= us % 1_000_000;
-    0
+    let ts = translate_va_t(current_user_token(), (_ts as usize).into()) as &'static mut TimeVal; 
+    *ts = TimeVal{sec: us / 1_000_000,
+    usec :  us % 1_000_000,
+    };
+    _tz as isize
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -56,19 +57,28 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    -1
+    let ti = translate_va_t(current_user_token(), (_ti as usize).into() )as &'static mut TaskInfo;
+    *ti = TaskInfo{
+     status: TaskStatus::Running,
+     syscall_times: current_task_sys_time() , 
+     /// Total running time of task
+     time: get_time_ms() - current_task_time(),    
+    }; 
+    0
 }
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+    let token  = current_user_token();
+    mmap(token,_start,_len,_port)
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+     let token  = current_user_token();
+     unmmap(token,_start,_len)
+
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
