@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{ MapPermission};
 use crate::sync::UPSafeCell;
 use crate::timer::{ get_time_ms};
 use crate::trap::TrapContext;
@@ -234,5 +235,21 @@ pub fn current_task_sys_time()-> [u32;MAX_SYSCALL_NUM]{
     drop(inner);
     t
 }
+/// mmap
+pub fn current_task_mmap(start: crate::mm::VirtAddr,end: crate::mm::VirtAddr,map_perm:MapPermission)->isize{
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task = inner.current_task;
+    let t = inner.tasks[current_task].memory_set.mmap(start, end, map_perm);
+    drop(inner);
+    t
+}
 
 
+/// munmap
+pub fn current_task_munmap(start: crate::mm::VirtAddr,end: crate::mm::VirtAddr)->isize{
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current_task = inner.current_task;
+    let t = inner.tasks[current_task].memory_set.munmap(start, end);
+    drop(inner);
+    t
+}

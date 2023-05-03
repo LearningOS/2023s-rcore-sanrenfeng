@@ -2,9 +2,9 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, current_task_time, current_task_sys_time,
+        current_task_mmap,change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, current_task_time, current_task_sys_time, current_task_munmap,
     }, timer::{get_time_us, get_time_ms},
-    mm::{translate_va_t,mmap, unmmap},
+    mm::{translate_va_t, VirtAddr, MapPermission},
 };
 
 #[repr(C)]
@@ -69,16 +69,43 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    let token  = current_user_token();
-    mmap(token,_start,_len,_port)
+        let start : VirtAddr = _start.into();
+        let end : VirtAddr = (_start + _len).into();
+        if start.page_offset()!=0{
+            return -1;
+        }
+        if (_port & !0x7 !=0 ) || (_port & 0x7 ==0) {
+            return -1;
+        }
+        // 第 0 位表示是否可读，第 1 位表示是否可写，第 2 位表示是否可执行。其他位无效且必须为 0
+        let mut flag = MapPermission::U ;
+        if _port & 1 == 1{
+            flag = flag | MapPermission::R;
+        } 
+        if _port>>1 & 1 == 1{
+            flag = flag | MapPermission::W;
+        }
+        if _port>>2 & 1 == 1{
+            flag = flag | MapPermission::X;
+        }
+        //info!("{:#?} =>>=>> {:#?}",start,_len,);
+
+        current_task_mmap(start, end, flag) 
+
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-     let token  = current_user_token();
-     unmmap(token,_start,_len)
+       trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+        let start : VirtAddr = _start.into();
+        let end : VirtAddr = (_start + _len).into();
+        if start.page_offset()!=0{
+            return -1;
+        }
+        
+        info!("sys_munmap{:#?} =>>=>> {:#?}",start,_len,);
 
+        current_task_munmap(start, end)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

@@ -262,8 +262,57 @@ impl MemorySet {
             false
         }
     }
+
+
+
+   /// start 没有按页大小对齐
+  /// port & !0x7 != 0 (port 其余位必须为0)
+  /// port & 0x7 = 0 (这样的内存无意义)
+  /// [start, start + len) 中存在已经被映射的页
+  /// 物理内存不足
+  /// mmap
+   pub fn mmap(&mut self,start:VirtAddr,end:VirtAddr,map_perm:MapPermission)-> isize{
+       let start_vpn :VirtPageNum= start.floor().into();
+       let end_vpn :VirtPageNum= end.ceil().into();
+       
+       info!("mapping {:#?} --- {:#?}",start_vpn,end_vpn);
+       for num in start_vpn.0..end_vpn.0{
+            let vpn = num.into();
+            let pte = self.page_table.translate(vpn);
+            if pte.is_some() && pte.unwrap().is_valid(){
+                info!("the {:#?} has ",vpn);
+                return -1;       
+            }
+        }
+        let mut area =  MapArea::new(start,end,MapType::Framed,map_perm);
+        area.map(&mut self.page_table);
+        self.areas.push(area);
+        0
+   }
+   /// unmmap 
+   pub fn munmap(&mut self,start:VirtAddr,end:VirtAddr)->isize{
+        let start_vpn : VirtPageNum = start.floor().into();
+        let end_vpn :VirtPageNum= end.ceil().into();
+
+        info!("unmapping {:#?} --- {:#?}",start_vpn,end_vpn);
+        for num in start_vpn.0..end_vpn.0{
+            let vpn = num.into();
+            let pte = self.page_table.translate(vpn);
+            if pte.is_none()||(pte.is_some()&&!pte.unwrap().is_valid()) {
+                info!("exist did't alloc");
+                return -1;       
+            }
+        }
+       if let Some((idx,area)) = self.areas.iter_mut().enumerate().find(|(_,area)|
+        area.vpn_range.get_start()==start_vpn && area.vpn_range.get_end()==end_vpn){
+           area.unmap(&mut self.page_table);
+           self.areas.remove(idx);
+           info!("unmap success!") ;
+       }
+
+       0
+   }      
 }
-/// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
     vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
@@ -356,7 +405,10 @@ impl MapArea {
             current_vpn.step();
         }
     }
+
+  
 }
+
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 /// map type for memory set: identical or framed

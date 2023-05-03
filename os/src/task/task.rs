@@ -107,7 +107,16 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }    
+    /// mmap
+    pub fn mmap(&mut self,start: VirtAddr,end:VirtAddr,map_perm:MapPermission)->isize{
+       self.memory_set.mmap(start, end, map_perm) 
     }
+
+    //// unmmap
+    // pub fn unmmap(token:usize,start:usize,len:usize)->isize{
+    //     PageTable::from_token(token).unmmap(start, len)
+    // }
 }
 
 #[derive(Copy, Clone, PartialEq)]
